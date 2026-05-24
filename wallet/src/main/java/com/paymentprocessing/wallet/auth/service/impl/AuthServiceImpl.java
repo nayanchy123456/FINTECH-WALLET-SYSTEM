@@ -7,11 +7,13 @@ import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.user.entity.Role;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.repository.UserRepository;
+import com.paymentprocessing.wallet.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -21,8 +23,10 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final WalletService walletService;
 
     @Override
+    @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new BadRequestException("Email already registered");
@@ -35,15 +39,18 @@ public class AuthServiceImpl implements AuthService {
                 .role(Role.USER)
                 .build();
 
-        userRepository.save(user);
+        User savedUser = userRepository.save(user);
 
-        String token = jwtService.generateToken(user.getEmail());
+        // Auto create wallet for new user
+        walletService.createWallet(savedUser.getId());
+
+        String token = jwtService.generateToken(savedUser.getEmail());
 
         return AuthResponse.builder()
                 .token(token)
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole().name())
+                .email(savedUser.getEmail())
+                .fullName(savedUser.getFullName())
+                .role(savedUser.getRole().name())
                 .build();
     }
 
