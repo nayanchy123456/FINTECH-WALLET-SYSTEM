@@ -2,6 +2,7 @@ package com.paymentprocessing.wallet.transaction.service.impl;
 
 import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
+import com.paymentprocessing.wallet.common.service.RedisService;
 import com.paymentprocessing.wallet.ledger.entity.AccountType;
 import com.paymentprocessing.wallet.ledger.service.LedgerService;
 import com.paymentprocessing.wallet.transaction.dto.TransactionResponse;
@@ -18,10 +19,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.UUID;
 
 @Slf4j
@@ -33,15 +36,50 @@ public class TransactionServiceImpl implements TransactionService {
     private final TransactionRepository transactionRepository;
     private final WalletRepository walletRepository;
     private final LedgerService ledgerService;
+    private final RedisService redisService;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    private static final String IDEMPOTENCY_KEY = "idempotency:";
+    private static final String RATE_LIMIT_KEY = "rate:limit:transfer:";
+    private static final int MAX_TRANSFERS_PER_MINUTE = 5;
 
     @Override
     @Transactional
     public TransactionResponse transfer(Long senderUserId, TransferRequest request) {
+
+        // Rate limiting — using Redis INCR for atomic increment
+        String rateLimitKey = RATE_LIMIT_KEY + senderUserId;
+        Long count = redisTemplate.opsForValue().increment(rateLimitKey);
+
+        if (count == 1) {
+            // First request — set expiry of 1 minute
+            redisTemplate.expire(rateLimitKey, Duration.ofMinutes(1));
+        }
+
+        if (count > MAX_TRANSFERS_PER_MINUTE) {
+            throw new BadRequestException(
+                    "Transfer limit exceeded. Max 5 transfers per minute allowed");
+        }
+
+        // Idempotency check
+        if (request.getIdempotencyKey() != null) {
+            String idempotencyKey = IDEMPOTENCY_KEY + request.getIdempotencyKey();
+            if (redisService.exists(idempotencyKey)) {
+                String existingRefId = redisService.get(idempotencyKey)
+                        .map(Object::toString)
+                        .orElse(null);
+                log.info("Duplicate request detected, returning existing transaction");
+                return getTransactionByReferenceId(existingRefId);
+            }
+        }
+
         Wallet senderWallet = walletRepository.findByUserId(senderUserId)
-                .orElseThrow(() -> new ResourceNotFoundException("Sender wallet not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Sender wallet not found"));
 
         Wallet receiverWallet = walletRepository.findById(request.getReceiverWalletId())
-                .orElseThrow(() -> new ResourceNotFoundException("Receiver wallet not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Receiver wallet not found"));
 
         // Validations
         if (senderWallet.getId().equals(receiverWallet.getId())) {
@@ -73,12 +111,14 @@ public class TransactionServiceImpl implements TransactionService {
 
         try {
             // Update wallet balances
-            senderWallet.setBalance(senderWallet.getBalance().subtract(request.getAmount()));
-            receiverWallet.setBalance(receiverWallet.getBalance().add(request.getAmount()));
+            senderWallet.setBalance(
+                    senderWallet.getBalance().subtract(request.getAmount()));
+            receiverWallet.setBalance(
+                    receiverWallet.getBalance().add(request.getAmount()));
             walletRepository.save(senderWallet);
             walletRepository.save(receiverWallet);
 
-            // Get or create ledger accounts for both users
+            // Get or create ledger accounts
             String senderAccountCode = "USR-" + senderWallet.getId();
             String receiverAccountCode = "USR-" + receiverWallet.getId();
 
@@ -103,6 +143,14 @@ public class TransactionServiceImpl implements TransactionService {
 
             transaction.setStatus(TransactionStatus.SUCCESS);
             transactionRepository.save(transaction);
+
+            // Store idempotency key
+            if (request.getIdempotencyKey() != null) {
+                redisService.set(
+                        IDEMPOTENCY_KEY + request.getIdempotencyKey(),
+                        referenceId,
+                        Duration.ofHours(24));
+            }
 
             log.info("Transfer successful: {}", referenceId);
 
@@ -176,12 +224,14 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public TransactionResponse getTransactionByReferenceId(String referenceId) {
         Transaction transaction = transactionRepository.findByReferenceId(referenceId)
-                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Transaction not found"));
         return mapToResponse(transaction);
     }
 
     @Override
-    public Page<TransactionResponse> getTransactionHistory(Long walletId, Pageable pageable) {
+    public Page<TransactionResponse> getTransactionHistory(
+            Long walletId, Pageable pageable) {
         return transactionRepository.findByWalletId(walletId, pageable)
                 .map(this::mapToResponse);
     }
