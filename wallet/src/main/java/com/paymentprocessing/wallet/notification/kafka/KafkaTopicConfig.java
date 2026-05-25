@@ -10,6 +10,7 @@ public class KafkaTopicConfig {
 
     public static final String TRANSACTION_TOPIC = "transaction.created";
     public static final String NOTIFICATION_TOPIC = "notification.send";
+    public static final String TRANSACTION_DLQ = "transaction.created.DLQ";
 
     @Bean
     public NewTopic transactionTopic() {
@@ -22,6 +23,14 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic notificationTopic() {
         return TopicBuilder.name(NOTIFICATION_TOPIC)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic transactionDLQTopic() {
+        return TopicBuilder.name(TRANSACTION_DLQ)
                 .partitions(3)
                 .replicas(1)
                 .build();
