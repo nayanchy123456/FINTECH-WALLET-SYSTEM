@@ -5,6 +5,8 @@ import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
 import com.paymentprocessing.wallet.common.service.RedisService;
 import com.paymentprocessing.wallet.ledger.entity.AccountType;
 import com.paymentprocessing.wallet.ledger.service.LedgerService;
+import com.paymentprocessing.wallet.notification.kafka.NotificationProducer;
+import com.paymentprocessing.wallet.notification.kafka.TransactionEvent;
 import com.paymentprocessing.wallet.transaction.dto.TransactionResponse;
 import com.paymentprocessing.wallet.transaction.dto.TransferRequest;
 import com.paymentprocessing.wallet.transaction.entity.Transaction;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -38,6 +41,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final LedgerService ledgerService;
     private final RedisService redisService;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final NotificationProducer notificationProducer;
 
     private static final String IDEMPOTENCY_KEY = "idempotency:";
     private static final String RATE_LIMIT_KEY = "rate:limit:transfer:";
@@ -47,16 +51,27 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public TransactionResponse transfer(Long senderUserId, TransferRequest request) {
 
-        // Rate limiting — using Redis INCR for atomic increment
-        String rateLimitKey = RATE_LIMIT_KEY + senderUserId;
-        Long count = redisTemplate.opsForValue().increment(rateLimitKey);
+        // Sliding Window Counter Rate Limiting
+        long currentWindow = System.currentTimeMillis() / 1000 / 60;
+        long previousWindow = currentWindow - 1;
 
-        if (count == 1) {
-            // First request — set expiry of 1 minute
-            redisTemplate.expire(rateLimitKey, Duration.ofMinutes(1));
+        String currentKey = RATE_LIMIT_KEY + senderUserId + ":" + currentWindow;
+        String previousKey = RATE_LIMIT_KEY + senderUserId + ":" + previousWindow;
+
+        Long currentCount = redisTemplate.opsForValue().increment(currentKey);
+        if (currentCount == 1) {
+            redisTemplate.expire(currentKey, Duration.ofMinutes(2));
         }
 
-        if (count > MAX_TRANSFERS_PER_MINUTE) {
+        long previousCount = Optional.ofNullable(
+                redisTemplate.opsForValue().get(previousKey))
+                .map(v -> Long.parseLong(v.toString()))
+                .orElse(0L);
+
+        double elapsed = (System.currentTimeMillis() % 60000) / 60000.0;
+        double effectiveCount = currentCount + previousCount * (1 - elapsed);
+
+        if (effectiveCount > MAX_TRANSFERS_PER_MINUTE) {
             throw new BadRequestException(
                     "Transfer limit exceeded. Max 5 transfers per minute allowed");
         }
@@ -144,6 +159,18 @@ public class TransactionServiceImpl implements TransactionService {
             transaction.setStatus(TransactionStatus.SUCCESS);
             transactionRepository.save(transaction);
 
+            // Publish Kafka event
+            notificationProducer.sendTransactionEvent(
+                    TransactionEvent.builder()
+                            .referenceId(referenceId)
+                            .senderUserId(senderWallet.getUser().getId())
+                            .receiverUserId(receiverWallet.getUser().getId())
+                            .amount(request.getAmount())
+                            .type("TRANSFER")
+                            .status("SUCCESS")
+                            .build()
+            );
+
             // Store idempotency key
             if (request.getIdempotencyKey() != null) {
                 redisService.set(
@@ -207,6 +234,17 @@ public class TransactionServiceImpl implements TransactionService {
 
             transaction.setStatus(TransactionStatus.SUCCESS);
             transactionRepository.save(transaction);
+
+            // Publish Kafka event
+            notificationProducer.sendTransactionEvent(
+                    TransactionEvent.builder()
+                            .referenceId(referenceId)
+                            .receiverUserId(wallet.getUser().getId())
+                            .amount(amount)
+                            .type("DEPOSIT")
+                            .status("SUCCESS")
+                            .build()
+            );
 
             log.info("Deposit successful: {}", referenceId);
 
