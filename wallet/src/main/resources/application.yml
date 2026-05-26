@@ -1,9 +1,6 @@
 spring:
-  application:
-    name: wallet
-
   datasource:
-    url: jdbc:mysql://localhost:3307/wallet_system?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/wallet_system?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -11,16 +8,16 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
-    open-in-view: false
+        dialect: org.hibernate.dialect.MySQLDialect
 
   data:
     redis:
       host: localhost
       port: 6379
+      timeout: 2000ms
 
   kafka:
     bootstrap-servers: localhost:9092
@@ -34,17 +31,15 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: "*"
-
-server:
-  port: 8080
+    listener:
+      missing-topics-fatal: false
+    admin:
+      fail-fast: false
 
 application:
   jwt:
     secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
     expiration: 86400000
 
-logging:
-  level:
-    root: INFO
-    com.paymentprocessing: DEBUG
-    org.springframework.security: DEBUG
+server:
+  port: 8080
