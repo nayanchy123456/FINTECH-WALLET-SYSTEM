@@ -13,6 +13,7 @@ import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
 import com.paymentprocessing.wallet.wallet.entity.Wallet;
 import com.paymentprocessing.wallet.wallet.repository.WalletRepository;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -26,6 +27,7 @@ import java.math.BigDecimal;
 @RestController
 @RequestMapping("/api/transactions")
 @RequiredArgsConstructor
+@Tag(name = "Transaction", description = "Transfer and deposit APIs")
 public class TransactionController {
 
     private final TransactionService transactionService;

@@ -1,12 +1,15 @@
 package com.paymentprocessing.wallet.common.exception;
 
 import com.paymentprocessing.wallet.common.response.ApiResponse;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
 @RestControllerAdvice
+@Order(Ordered.LOWEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -40,6 +43,6 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("Internal server error"));
+                .body(ApiResponse.error("Internal server error: " + ex.getMessage()));
     }
 }
