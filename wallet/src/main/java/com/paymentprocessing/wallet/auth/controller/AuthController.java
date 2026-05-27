@@ -3,6 +3,8 @@ package com.paymentprocessing.wallet.auth.controller;
 import com.paymentprocessing.wallet.auth.dto.*;
 import com.paymentprocessing.wallet.auth.service.AuthService;
 import com.paymentprocessing.wallet.common.response.ApiResponse;
+
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Tag(name = "Auth", description = "Register and Login APIs")
 public class AuthController {
 
     private final AuthService authService;

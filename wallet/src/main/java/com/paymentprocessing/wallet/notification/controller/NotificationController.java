@@ -6,15 +6,17 @@ import com.paymentprocessing.wallet.notification.dto.NotificationResponse;
 import com.paymentprocessing.wallet.notification.service.NotificationService;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.service.UserService;
+
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
+@Tag(name = "Notification", description = "Notification APIs")
 public class NotificationController {
 
     private final NotificationService notificationService;
