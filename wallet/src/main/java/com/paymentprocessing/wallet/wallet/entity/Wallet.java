@@ -27,4 +27,7 @@ public class Wallet extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private WalletStatus status = WalletStatus.ACTIVE;
+
+    @Version
+    private Long version;
 }

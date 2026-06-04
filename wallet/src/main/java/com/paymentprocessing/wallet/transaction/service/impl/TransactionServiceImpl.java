@@ -259,6 +259,77 @@ public class TransactionServiceImpl implements TransactionService {
         return mapToResponse(transaction);
     }
 
+
+    @Override
+@Transactional
+public TransactionResponse withdraw(Long userId, BigDecimal amount) {
+    Wallet wallet = walletRepository.findByUserId(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
+
+    if (wallet.getStatus() != WalletStatus.ACTIVE) {
+        throw new BadRequestException("Wallet is not active");
+    }
+
+    if (wallet.getBalance().compareTo(amount) < 0) {
+        throw new BadRequestException("Insufficient balance");
+    }
+
+    String referenceId = UUID.randomUUID().toString();
+
+    Transaction transaction = Transaction.builder()
+            .senderWallet(wallet)
+            .amount(amount)
+            .type(TransactionType.WITHDRAWAL)
+            .status(TransactionStatus.PENDING)
+            .referenceId(referenceId)
+            .description("Withdrawal from wallet")
+            .build();
+
+    transactionRepository.save(transaction);
+
+    try {
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+        walletRepository.save(wallet);
+
+        String userAccountCode = "USR-" + wallet.getId();
+        ledgerService.getOrCreateAccount(
+                userAccountCode,
+                "User Wallet Account - " + wallet.getId(),
+                AccountType.ASSET);
+
+        ledgerService.recordDoubleEntry(
+                referenceId,
+                "Withdrawal from wallet " + wallet.getId(),
+                userAccountCode,
+                "SYS-LIABILITY",
+                amount);
+
+        transaction.setStatus(TransactionStatus.SUCCESS);
+        transactionRepository.save(transaction);
+
+        notificationProducer.sendTransactionEvent(
+                TransactionEvent.builder()
+                        .referenceId(referenceId)
+                        .senderUserId(wallet.getUser().getId())
+                        .amount(amount)
+                        .type("WITHDRAWAL")
+                        .status("SUCCESS")
+                        .build()
+        );
+
+        log.info("Withdrawal successful: {}", referenceId);
+
+    } catch (Exception e) {
+        transaction.setStatus(TransactionStatus.FAILED);
+        transaction.setFailureReason(e.getMessage());
+        transactionRepository.save(transaction);
+        log.error("Withdrawal failed: {}", e.getMessage());
+        throw new BadRequestException("Withdrawal failed: " + e.getMessage());
+    }
+
+    return mapToResponse(transaction);
+}
+
     @Override
     public TransactionResponse getTransactionByReferenceId(String referenceId) {
         Transaction transaction = transactionRepository.findByReferenceId(referenceId)
