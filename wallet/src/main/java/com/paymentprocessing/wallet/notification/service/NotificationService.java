@@ -8,4 +8,6 @@ public interface NotificationService {
     void processTransactionEvent(TransactionEvent event);
     List<NotificationResponse> getUserNotifications(Long userId);
     List<NotificationResponse> getUnreadNotifications(Long userId);
+    NotificationResponse markAsRead(Long notificationId, Long userId);
+    void markAllAsRead(Long userId);
 }

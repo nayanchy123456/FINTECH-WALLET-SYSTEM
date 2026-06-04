@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.paymentprocessing.wallet.common.exception.BadRequestException;
+import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -103,4 +105,34 @@ public class NotificationServiceImpl implements NotificationService {
                 .createdAt(notification.getCreatedAt())
                 .build();
     }
+
+
+    @Override
+@Transactional
+public NotificationResponse markAsRead(Long notificationId, Long userId) {
+    Notification notification = notificationRepository.findById(notificationId)
+            .orElseThrow(() -> new ResourceNotFoundException(
+                    "Notification not found"));
+
+    if (!notification.getUserId().equals(userId)) {
+        throw new BadRequestException(
+                "You are not authorized to update this notification");
+    }
+
+    notification.setStatus(NotificationStatus.READ);
+    Notification updated = notificationRepository.save(notification);
+    log.info("Notification marked as read: {} for user: {}", notificationId, userId);
+    return mapToResponse(updated);
+}
+
+@Override
+@Transactional
+public void markAllAsRead(Long userId) {
+    List<Notification> unread = notificationRepository
+            .findByUserIdAndStatus(userId, NotificationStatus.PENDING);
+
+    unread.forEach(n -> n.setStatus(NotificationStatus.READ));
+    notificationRepository.saveAll(unread);
+    log.info("All notifications marked as read for user: {}", userId);
+}
 }

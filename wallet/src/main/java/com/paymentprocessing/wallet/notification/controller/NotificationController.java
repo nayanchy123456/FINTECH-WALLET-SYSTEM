@@ -41,4 +41,24 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.success(response,
                 "Unread notifications fetched successfully"));
     }
+
+    @PatchMapping("/{notificationId}/read")
+public ResponseEntity<ApiResponse<NotificationResponse>> markAsRead(
+        @PathVariable Long notificationId) {
+    String email = SecurityUtil.getCurrentUserEmail();
+    User user = userService.findByEmail(email);
+    NotificationResponse response =
+            notificationService.markAsRead(notificationId, user.getId());
+    return ResponseEntity.ok(ApiResponse.success(response,
+            "Notification marked as read"));
+}
+
+@PatchMapping("/read-all")
+public ResponseEntity<ApiResponse<Void>> markAllAsRead() {
+    String email = SecurityUtil.getCurrentUserEmail();
+    User user = userService.findByEmail(email);
+    notificationService.markAllAsRead(user.getId());
+    return ResponseEntity.ok(ApiResponse.success(null,
+            "All notifications marked as read"));
+}
 }
