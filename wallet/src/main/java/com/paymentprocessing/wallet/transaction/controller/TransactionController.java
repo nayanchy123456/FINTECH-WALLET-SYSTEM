@@ -53,6 +53,16 @@ public class TransactionController {
         return ResponseEntity.ok(ApiResponse.success(response, "Deposit successful"));
     }
 
+
+    @PostMapping("/withdraw")
+public ResponseEntity<ApiResponse<TransactionResponse>> withdraw(
+        @RequestParam BigDecimal amount) {
+    String email = SecurityUtil.getCurrentUserEmail();
+    User user = userService.findByEmail(email);
+    TransactionResponse response = transactionService.withdraw(user.getId(), amount);
+    return ResponseEntity.ok(ApiResponse.success(response, "Withdrawal successful"));
+}
+
  @GetMapping("/history")
 public ResponseEntity<ApiResponse<Page<TransactionResponse>>> getHistory(
         @RequestParam(defaultValue = "0") int page,
