@@ -103,6 +103,54 @@
     <version>2.8.9</version>
 </dependency>
 
+
+
+<!-- Testcontainers core -->
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>testcontainers</artifactId>
+    <version>1.19.8</version>
+    <scope>test</scope>
+</dependency>
+
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>junit-jupiter</artifactId>
+    <version>1.19.8</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Testcontainers MySQL -->
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>mysql</artifactId>
+    <version>1.19.8</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Testcontainers Kafka -->
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>kafka</artifactId>
+    <version>1.19.8</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Spring Kafka Test -->
+<dependency>
+    <groupId>org.springframework.kafka</groupId>
+    <artifactId>spring-kafka-test</artifactId>
+    <scope>test</scope>
+</dependency>
+
+<!-- Awaitility — for testing async Kafka events -->
+<dependency>
+    <groupId>org.awaitility</groupId>
+    <artifactId>awaitility</artifactId>
+    <version>4.2.1</version>
+    <scope>test</scope>
+</dependency>
+
 	</dependencies>
 
 	<build>
