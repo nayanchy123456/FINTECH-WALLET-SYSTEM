@@ -58,7 +58,7 @@ class NotificationServiceImplTest {
                 .title("Transfer Sent")
                 .message("You sent Rs.200 successfully. Reference: ref-123")
                 .referenceId("ref-123")
-                .status(NotificationStatus.SENT)
+                .status(NotificationStatus.PENDING)
                 .type("TRANSFER_SENT")
                 .build();
         notification.setId(1L);
