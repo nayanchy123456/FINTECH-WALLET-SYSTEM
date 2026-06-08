@@ -1,6 +1,7 @@
 package com.paymentprocessing.wallet.auth.security;
 
 import com.paymentprocessing.wallet.user.repository.UserRepository;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +17,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
@@ -24,6 +26,16 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
         private final UserRepository userRepository;
+
+        /**
+         * Returns 401 Unauthorized (instead of the Spring Security default 403)
+         * when a request reaches a protected endpoint with no valid token.
+         */
+        @Bean
+        public AuthenticationEntryPoint unauthorizedEntryPoint() {
+                return (request, response, authException) ->
+                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+        }
 
         @Bean
         public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -41,6 +53,9 @@ public class SecurityConfig {
                                                 .anyRequest().authenticated())
                                 .sessionManagement(session -> session
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                // ← key fix: tell Spring Security to return 401, not 403
+                                .exceptionHandling(ex -> ex
+                                                .authenticationEntryPoint(unauthorizedEntryPoint()))
                                 .authenticationProvider(authenticationProvider())
                                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 

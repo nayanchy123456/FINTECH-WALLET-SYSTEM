@@ -78,6 +78,10 @@ public class NotificationServiceImpl implements NotificationService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Creates a new notification with PENDING status (= unread).
+     * PENDING is the canonical "unread" state used throughout the system.
+     */
     private void createNotification(Long userId, String title,
                                     String message, String referenceId,
                                     String type) {
@@ -86,7 +90,7 @@ public class NotificationServiceImpl implements NotificationService {
                 .title(title)
                 .message(message)
                 .referenceId(referenceId)
-                .status(NotificationStatus.SENT)
+                .status(NotificationStatus.PENDING)   // was SENT — fixed to PENDING
                 .type(type)
                 .build();
         notificationRepository.save(notification);
@@ -106,33 +110,32 @@ public class NotificationServiceImpl implements NotificationService {
                 .build();
     }
 
-
     @Override
-@Transactional
-public NotificationResponse markAsRead(Long notificationId, Long userId) {
-    Notification notification = notificationRepository.findById(notificationId)
-            .orElseThrow(() -> new ResourceNotFoundException(
-                    "Notification not found"));
+    @Transactional
+    public NotificationResponse markAsRead(Long notificationId, Long userId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Notification not found"));
 
-    if (!notification.getUserId().equals(userId)) {
-        throw new BadRequestException(
-                "You are not authorized to update this notification");
+        if (!notification.getUserId().equals(userId)) {
+            throw new BadRequestException(
+                    "You are not authorized to update this notification");
+        }
+
+        notification.setStatus(NotificationStatus.READ);
+        Notification updated = notificationRepository.save(notification);
+        log.info("Notification marked as read: {} for user: {}", notificationId, userId);
+        return mapToResponse(updated);
     }
 
-    notification.setStatus(NotificationStatus.READ);
-    Notification updated = notificationRepository.save(notification);
-    log.info("Notification marked as read: {} for user: {}", notificationId, userId);
-    return mapToResponse(updated);
-}
+    @Override
+    @Transactional
+    public void markAllAsRead(Long userId) {
+        List<Notification> unread = notificationRepository
+                .findByUserIdAndStatus(userId, NotificationStatus.PENDING);
 
-@Override
-@Transactional
-public void markAllAsRead(Long userId) {
-    List<Notification> unread = notificationRepository
-            .findByUserIdAndStatus(userId, NotificationStatus.PENDING);
-
-    unread.forEach(n -> n.setStatus(NotificationStatus.READ));
-    notificationRepository.saveAll(unread);
-    log.info("All notifications marked as read for user: {}", userId);
-}
+        unread.forEach(n -> n.setStatus(NotificationStatus.READ));
+        notificationRepository.saveAll(unread);
+        log.info("All notifications marked as read for user: {}", userId);
+    }
 }
