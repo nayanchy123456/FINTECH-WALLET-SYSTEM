@@ -123,7 +123,7 @@ class TransferIntegrationTest extends IntegrationTestBase {
                                 "amount", "100.00",
                                 "description", "No auth"
                         ))))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

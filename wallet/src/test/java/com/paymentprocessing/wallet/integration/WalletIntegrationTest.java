@@ -53,7 +53,7 @@ class WalletIntegrationTest extends IntegrationTestBase {
     @DisplayName("Get wallet without token returns 403")
     void wallet_ShouldFail_WithoutAuth() throws Exception {
         mockMvc.perform(get("/api/wallets/my-wallet"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
