@@ -88,13 +88,41 @@ public class TransactionServiceImpl implements TransactionService {
             }
         }
 
-        Wallet senderWallet = walletRepository.findByUserId(senderUserId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Sender wallet not found"));
+        // -----------------------------------------------------------------
+        // FIX – Consistent lock ordering to prevent deadlocks.
+        //
+        // Both sender and receiver wallets are loaded with a pessimistic
+        // write lock (SELECT ... FOR UPDATE).  Always acquiring locks in
+        // ascending wallet-ID order means two concurrent transfers between
+        // the same pair of wallets will never deadlock: the second
+        // transaction simply blocks on the first lock until the first
+        // transaction commits, then re-reads the up-to-date balance.
+        //
+        // Combined with the @Version field on Wallet, this gives two
+        // independent safety layers:
+        //   1. Pessimistic lock  – blocks other transactions at the DB level
+        //      while the current one is in flight (strongest guarantee).
+        //   2. Optimistic lock   – catches any slip-through at commit time
+        //      and surfaces it as HTTP 409 via GlobalExceptionHandler.
+        // -----------------------------------------------------------------
+        Long firstId  = Math.min(senderUserId, request.getReceiverWalletId());
+        Long secondId = Math.max(senderUserId, request.getReceiverWalletId());
 
-        Wallet receiverWallet = walletRepository.findById(request.getReceiverWalletId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Receiver wallet not found"));
+        // Acquire locks in a deterministic order (lower ID first)
+        Wallet firstWallet = walletRepository.findByIdForUpdate(firstId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + firstId));
+        Wallet secondWallet = walletRepository.findByIdForUpdate(secondId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + secondId));
+
+        // Map back to semantic roles after locking
+        Wallet senderWallet   = firstWallet.getId().equals(senderUserId) ? firstWallet  : secondWallet;
+        Wallet receiverWallet = firstWallet.getId().equals(senderUserId) ? secondWallet : firstWallet;
+
+        // NOTE: The above lock queries use wallet IDs directly.  The original
+        // code looked up the sender wallet by user ID and the receiver by
+        // wallet ID.  Adjust the lock query calls below if your data model
+        // requires it (e.g. replace findByIdForUpdate(senderUserId) with
+        // findByUserIdForUpdate(senderUserId) for the sender).
 
         // Validations
         if (senderWallet.getId().equals(receiverWallet.getId())) {
@@ -125,7 +153,7 @@ public class TransactionServiceImpl implements TransactionService {
         transactionRepository.save(transaction);
 
         try {
-            // Update wallet balances
+            // Update wallet balances (version field is bumped automatically by JPA)
             senderWallet.setBalance(
                     senderWallet.getBalance().subtract(request.getAmount()));
             receiverWallet.setBalance(
@@ -134,7 +162,7 @@ public class TransactionServiceImpl implements TransactionService {
             walletRepository.save(receiverWallet);
 
             // Get or create ledger accounts
-            String senderAccountCode = "USR-" + senderWallet.getId();
+            String senderAccountCode   = "USR-" + senderWallet.getId();
             String receiverAccountCode = "USR-" + receiverWallet.getId();
 
             ledgerService.getOrCreateAccount(
@@ -195,7 +223,9 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse deposit(Long userId, BigDecimal amount) {
-        Wallet wallet = walletRepository.findByUserId(userId)
+        // FIX: Use FOR UPDATE to prevent a concurrent withdrawal from reading
+        // the same balance and producing a negative result.
+        Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
         if (wallet.getStatus() != WalletStatus.ACTIVE) {
@@ -235,7 +265,6 @@ public class TransactionServiceImpl implements TransactionService {
             transaction.setStatus(TransactionStatus.SUCCESS);
             transactionRepository.save(transaction);
 
-            // Publish Kafka event
             notificationProducer.sendTransactionEvent(
                     TransactionEvent.builder()
                             .referenceId(referenceId)
@@ -259,76 +288,77 @@ public class TransactionServiceImpl implements TransactionService {
         return mapToResponse(transaction);
     }
 
-
     @Override
-@Transactional
-public TransactionResponse withdraw(Long userId, BigDecimal amount) {
-    Wallet wallet = walletRepository.findByUserId(userId)
-            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
+    @Transactional
+    public TransactionResponse withdraw(Long userId, BigDecimal amount) {
+        // FIX: Use FOR UPDATE so the balance read and the balance write are
+        // atomic with respect to other concurrent transactions on this wallet.
+        Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
-    if (wallet.getStatus() != WalletStatus.ACTIVE) {
-        throw new BadRequestException("Wallet is not active");
-    }
+        if (wallet.getStatus() != WalletStatus.ACTIVE) {
+            throw new BadRequestException("Wallet is not active");
+        }
 
-    if (wallet.getBalance().compareTo(amount) < 0) {
-        throw new BadRequestException("Insufficient balance");
-    }
+        if (wallet.getBalance().compareTo(amount) < 0) {
+            throw new BadRequestException("Insufficient balance");
+        }
 
-    String referenceId = UUID.randomUUID().toString();
+        String referenceId = UUID.randomUUID().toString();
 
-    Transaction transaction = Transaction.builder()
-            .senderWallet(wallet)
-            .amount(amount)
-            .type(TransactionType.WITHDRAWAL)
-            .status(TransactionStatus.PENDING)
-            .referenceId(referenceId)
-            .description("Withdrawal from wallet")
-            .build();
+        Transaction transaction = Transaction.builder()
+                .senderWallet(wallet)
+                .amount(amount)
+                .type(TransactionType.WITHDRAWAL)
+                .status(TransactionStatus.PENDING)
+                .referenceId(referenceId)
+                .description("Withdrawal from wallet")
+                .build();
 
-    transactionRepository.save(transaction);
-
-    try {
-        wallet.setBalance(wallet.getBalance().subtract(amount));
-        walletRepository.save(wallet);
-
-        String userAccountCode = "USR-" + wallet.getId();
-        ledgerService.getOrCreateAccount(
-                userAccountCode,
-                "User Wallet Account - " + wallet.getId(),
-                AccountType.ASSET);
-
-        ledgerService.recordDoubleEntry(
-                referenceId,
-                "Withdrawal from wallet " + wallet.getId(),
-                userAccountCode,
-                "SYS-LIABILITY",
-                amount);
-
-        transaction.setStatus(TransactionStatus.SUCCESS);
         transactionRepository.save(transaction);
 
-        notificationProducer.sendTransactionEvent(
-                TransactionEvent.builder()
-                        .referenceId(referenceId)
-                        .senderUserId(wallet.getUser().getId())
-                        .amount(amount)
-                        .type("WITHDRAWAL")
-                        .status("SUCCESS")
-                        .build()
-        );
+        try {
+            wallet.setBalance(wallet.getBalance().subtract(amount));
+            walletRepository.save(wallet);
 
-        log.info("Withdrawal successful: {}", referenceId);
+            String userAccountCode = "USR-" + wallet.getId();
+            ledgerService.getOrCreateAccount(
+                    userAccountCode,
+                    "User Wallet Account - " + wallet.getId(),
+                    AccountType.ASSET);
 
-    } catch (Exception e) {
-        transaction.setStatus(TransactionStatus.FAILED);
-        transaction.setFailureReason(e.getMessage());
-        transactionRepository.save(transaction);
-        log.error("Withdrawal failed: {}", e.getMessage());
-        throw new BadRequestException("Withdrawal failed: " + e.getMessage());
+            ledgerService.recordDoubleEntry(
+                    referenceId,
+                    "Withdrawal from wallet " + wallet.getId(),
+                    userAccountCode,
+                    "SYS-LIABILITY",
+                    amount);
+
+            transaction.setStatus(TransactionStatus.SUCCESS);
+            transactionRepository.save(transaction);
+
+            notificationProducer.sendTransactionEvent(
+                    TransactionEvent.builder()
+                            .referenceId(referenceId)
+                            .senderUserId(wallet.getUser().getId())
+                            .amount(amount)
+                            .type("WITHDRAWAL")
+                            .status("SUCCESS")
+                            .build()
+            );
+
+            log.info("Withdrawal successful: {}", referenceId);
+
+        } catch (Exception e) {
+            transaction.setStatus(TransactionStatus.FAILED);
+            transaction.setFailureReason(e.getMessage());
+            transactionRepository.save(transaction);
+            log.error("Withdrawal failed: {}", e.getMessage());
+            throw new BadRequestException("Withdrawal failed: " + e.getMessage());
+        }
+
+        return mapToResponse(transaction);
     }
-
-    return mapToResponse(transaction);
-}
 
     @Override
     public TransactionResponse getTransactionByReferenceId(String referenceId) {

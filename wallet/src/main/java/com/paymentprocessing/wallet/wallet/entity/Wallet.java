@@ -28,6 +28,10 @@ public class Wallet extends BaseEntity {
     @Builder.Default
     private WalletStatus status = WalletStatus.ACTIVE;
 
+    // ✅ Optimistic locking: JPA increments this version on every UPDATE.
+    // If two concurrent transactions read the same version and both try to
+    // commit, the second one gets an ObjectOptimisticLockingFailureException,
+    // which is caught by GlobalExceptionHandler and returned as HTTP 409.
     @Version
     private Long version;
 }
