@@ -5,14 +5,14 @@ services:
     image: mysql:8.0
     container_name: wallet_mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: wallet_system
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
     ports:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 20s
       retries: 10
@@ -73,9 +73,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/wallet_system?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${DB_NAME}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -83,8 +83,8 @@ services:
       SPRING_KAFKA_CONSUMER_BOOTSTRAP_SERVERS: kafka:29092
       SPRING_KAFKA_LISTENER_MISSING_TOPICS_FATAL: "false"
       SPRING_KAFKA_ADMIN_FAIL_FAST: "false"
-      APPLICATION_JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-      APPLICATION_JWT_EXPIRATION: 86400000
+      APPLICATION_JWT_SECRET: ${JWT_SECRET}
+      APPLICATION_JWT_EXPIRATION: ${JWT_EXPIRATION}
     depends_on:
       mysql:
         condition: "service_healthy"
