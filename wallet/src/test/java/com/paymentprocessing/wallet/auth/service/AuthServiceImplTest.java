@@ -91,6 +91,7 @@ class AuthServiceImplTest {
         assertThat(response.getEmail()).isEqualTo("john@test.com");
         assertThat(response.getFullName()).isEqualTo("John Doe");
         assertThat(response.getRole()).isEqualTo("USER");
+        assertThat(response.getUserId()).isEqualTo(1L);
 
         verify(walletService, times(1)).createWallet(savedUser.getId());
     }

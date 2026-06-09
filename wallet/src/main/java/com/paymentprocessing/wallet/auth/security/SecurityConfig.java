@@ -16,8 +16,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
@@ -25,70 +25,65 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-        private final UserRepository userRepository;
+    private final UserRepository userRepository;
 
-        /**
-         * Returns 401 Unauthorized (instead of the Spring Security default 403)
-         * when a request reaches a protected endpoint with no valid token.
-         */
-        @Bean
-        public AuthenticationEntryPoint unauthorizedEntryPoint() {
-                return (request, response, authException) ->
-                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
-        }
+    @Bean
+    public AuthenticationEntryPoint unauthorizedEntryPoint() {
+        return (request, response, authException) ->
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+    }
 
-        @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                        JwtAuthFilter jwtAuthFilter) throws Exception {
-                http
-                                .csrf(csrf -> csrf.disable())
-                                .authorizeHttpRequests(auth -> auth
-                                                .requestMatchers("/api/auth/**").permitAll()
-                                                .requestMatchers(
-                                                                "/swagger-ui/**",
-                                                                "/swagger-ui.html",
-                                                                "/v3/api-docs/**",
-                                                                "/v3/api-docs")
-                                                .permitAll()
-                                                .anyRequest().authenticated())
-                                .sessionManagement(session -> session
-                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                                // ← key fix: tell Spring Security to return 401, not 403
-                                .exceptionHandling(ex -> ex
-                                                .authenticationEntryPoint(unauthorizedEntryPoint()))
-                                .authenticationProvider(authenticationProvider())
-                                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+            JwtAuthFilter jwtAuthFilter) throws Exception {
+        http
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**",
+                                "/v3/api-docs")
+                        .permitAll()
+                        .anyRequest().authenticated())
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(unauthorizedEntryPoint()))
+                .authenticationProvider(authenticationProvider())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-                return http.build();
-        }
+        return http.build();
+    }
 
-        @Bean
-        public UserDetailsService userDetailsService() {
-                return email -> userRepository.findByEmail(email)
-                                .map(user -> org.springframework.security.core.userdetails.User
-                                                .withUsername(user.getEmail())
-                                                .password(user.getPassword())
-                                                .roles(user.getRole().name())
-                                                .build())
-                                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
-        }
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return email -> userRepository.findByEmail(email)
+                .map(user -> org.springframework.security.core.userdetails.User
+                        .withUsername(user.getEmail())
+                        .password(user.getPassword())
+                        .roles(user.getRole().name())
+                        .build())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+    }
 
-        @Bean
-        public AuthenticationProvider authenticationProvider() {
-                DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-                provider.setUserDetailsService(userDetailsService());
-                provider.setPasswordEncoder(passwordEncoder());
-                return provider;
-        }
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService());
+        provider.setPasswordEncoder(passwordEncoder());
+        return provider;
+    }
 
-        @Bean
-        public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
-                        throws Exception {
-                return config.getAuthenticationManager();
-        }
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
+            throws Exception {
+        return config.getAuthenticationManager();
+    }
 
-        @Bean
-        public PasswordEncoder passwordEncoder() {
-                return new BCryptPasswordEncoder();
-        }
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
 }
