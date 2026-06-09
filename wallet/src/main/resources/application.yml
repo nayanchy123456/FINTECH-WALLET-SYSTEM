@@ -9,6 +9,7 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: false
+    open-in-view: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
@@ -52,3 +53,6 @@ server:
     enabled: true
     path: /swagger-ui.html
   packages-to-scan: com.paymentprocessing.wallet
+logging:
+  level:
+    org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer: ERROR
