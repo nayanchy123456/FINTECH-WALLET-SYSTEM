@@ -9,17 +9,19 @@ import com.paymentprocessing.wallet.transaction.service.TransactionService;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.service.UserService;
 import com.paymentprocessing.wallet.wallet.entity.Wallet;
-import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
-import com.paymentprocessing.wallet.wallet.entity.Wallet;
 import com.paymentprocessing.wallet.wallet.repository.WalletRepository;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -27,13 +29,13 @@ import java.math.BigDecimal;
 @RestController
 @RequestMapping("/api/transactions")
 @RequiredArgsConstructor
-@Tag(name = "Transaction", description = "Transfer and deposit APIs")
+@Validated
+@Tag(name = "Transaction", description = "Transfer, deposit, and withdrawal APIs")
 public class TransactionController {
 
     private final TransactionService transactionService;
     private final UserService userService;
     private final WalletRepository walletRepository;
-
 
     @PostMapping("/transfer")
     public ResponseEntity<ApiResponse<TransactionResponse>> transfer(
@@ -46,38 +48,36 @@ public class TransactionController {
 
     @PostMapping("/deposit")
     public ResponseEntity<ApiResponse<TransactionResponse>> deposit(
-            @RequestParam BigDecimal amount) {
+            @RequestParam @NotNull @DecimalMin("0.01") @DecimalMax("1000000.00") BigDecimal amount) {
         String email = SecurityUtil.getCurrentUserEmail();
         User user = userService.findByEmail(email);
         TransactionResponse response = transactionService.deposit(user.getId(), amount);
         return ResponseEntity.ok(ApiResponse.success(response, "Deposit successful"));
     }
 
-
     @PostMapping("/withdraw")
-public ResponseEntity<ApiResponse<TransactionResponse>> withdraw(
-        @RequestParam BigDecimal amount) {
-    String email = SecurityUtil.getCurrentUserEmail();
-    User user = userService.findByEmail(email);
-    TransactionResponse response = transactionService.withdraw(user.getId(), amount);
-    return ResponseEntity.ok(ApiResponse.success(response, "Withdrawal successful"));
-}
+    public ResponseEntity<ApiResponse<TransactionResponse>> withdraw(
+            @RequestParam @NotNull @DecimalMin("0.01") @DecimalMax("1000000.00") BigDecimal amount) {
+        String email = SecurityUtil.getCurrentUserEmail();
+        User user = userService.findByEmail(email);
+        TransactionResponse response = transactionService.withdraw(user.getId(), amount);
+        return ResponseEntity.ok(ApiResponse.success(response, "Withdrawal successful"));
+    }
 
- @GetMapping("/history")
-public ResponseEntity<ApiResponse<Page<TransactionResponse>>> getHistory(
-        @RequestParam(defaultValue = "0") int page,
-        @RequestParam(defaultValue = "10") int size) {
-    String email = SecurityUtil.getCurrentUserEmail();
-    User user = userService.findByEmail(email);
-    // Get wallet first then pass walletId
-    Wallet wallet = walletRepository.findByUserId(user.getId())
-            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
-    Pageable pageable = PageRequest.of(page, size);
-    Page<TransactionResponse> response = transactionService
-            .getTransactionHistory(wallet.getId(), pageable);
-    return ResponseEntity.ok(ApiResponse.success(response,
-            "Transaction history fetched successfully"));
-}
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<Page<TransactionResponse>>> getHistory(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        String email = SecurityUtil.getCurrentUserEmail();
+        User user = userService.findByEmail(email);
+        Wallet wallet = walletRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
+        Pageable pageable = PageRequest.of(page, size);
+        Page<TransactionResponse> response = transactionService
+                .getTransactionHistory(wallet.getId(), pageable);
+        return ResponseEntity.ok(ApiResponse.success(response,
+                "Transaction history fetched successfully"));
+    }
 
     @GetMapping("/{referenceId}")
     public ResponseEntity<ApiResponse<TransactionResponse>> getByReferenceId(
