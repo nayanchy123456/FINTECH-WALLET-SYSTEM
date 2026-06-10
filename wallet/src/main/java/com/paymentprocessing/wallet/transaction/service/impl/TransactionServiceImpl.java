@@ -22,11 +22,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,37 +45,76 @@ public class TransactionServiceImpl implements TransactionService {
     private final LedgerService ledgerService;
     private final RedisService redisService;
     private final RedisTemplate<String, Object> redisTemplate;
+    // StringRedisTemplate uses plain string serialization — required for INCR
+    // to work correctly. GenericJackson2JsonRedisSerializer wraps values in JSON,
+    // making them non-integer and causing Redis to reject INCR with an error.
+    private final StringRedisTemplate stringRedisTemplate;
     private final NotificationProducer notificationProducer;
 
     private static final String IDEMPOTENCY_KEY = "idempotency:";
     private static final String RATE_LIMIT_KEY = "rate:limit:transfer:";
     private static final int MAX_TRANSFERS_PER_MINUTE = 5;
 
+    /**
+     * Lua script for an atomic sliding-window rate-limit check-and-increment.
+     *
+     * Keys:  KEYS[1] = current-window key,  KEYS[2] = previous-window key
+     * Args:  ARGV[1] = window TTL in seconds (120),
+     *        ARGV[2] = elapsed fraction of the current minute * 1000 (integer)
+     *        ARGV[3] = max allowed count * 1000 (integer)
+     *
+     * Returns 1 if the request is allowed (counter already incremented),
+     *         0 if the rate limit is exceeded (counter NOT incremented).
+     *
+     * Uses stringRedisTemplate so values are stored as plain integers, which
+     * is a hard requirement for Redis INCR / GET to interoperate correctly.
+     */
+    private static final DefaultRedisScript<Long> RATE_LIMIT_SCRIPT;
+    static {
+        RATE_LIMIT_SCRIPT = new DefaultRedisScript<>();
+        RATE_LIMIT_SCRIPT.setResultType(Long.class);
+        RATE_LIMIT_SCRIPT.setScriptText(
+            "local cur = tonumber(redis.call('GET', KEYS[1]) or 0) " +
+            "local prev = tonumber(redis.call('GET', KEYS[2]) or 0) " +
+            "local elapsed = tonumber(ARGV[2]) " +        // * 1000, integer math
+            "local maxCount = tonumber(ARGV[3]) " +       // * 1000
+            // effective = (cur+1) + prev * (1 - elapsed/1000)
+            // multiply everything by 1000 to stay in integer arithmetic
+            "local effective = (cur + 1) * 1000 + prev * (1000 - elapsed) " +
+            "if effective > maxCount then return 0 end " +
+            "local newVal = redis.call('INCR', KEYS[1]) " +
+            "if newVal == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end " +
+            "return 1"
+        );
+    }
+
     @Override
     @Transactional
     public TransactionResponse transfer(Long senderUserId, TransferRequest request) {
 
-        // Sliding Window Counter Rate Limiting
-        long currentWindow = System.currentTimeMillis() / 1000 / 60;
+        // Sliding Window Counter Rate Limiting – atomic via Lua script.
+        // Executed via stringRedisTemplate so counter values are stored as
+        // plain integers (required for INCR). The JSON-serializing redisTemplate
+        // must NOT be used here.
+        long currentWindow  = System.currentTimeMillis() / 1000 / 60;
         long previousWindow = currentWindow - 1;
 
-        String currentKey = RATE_LIMIT_KEY + senderUserId + ":" + currentWindow;
+        String currentKey  = RATE_LIMIT_KEY + senderUserId + ":" + currentWindow;
         String previousKey = RATE_LIMIT_KEY + senderUserId + ":" + previousWindow;
 
-        Long currentCount = redisTemplate.opsForValue().increment(currentKey);
-        if (currentCount == 1) {
-            redisTemplate.expire(currentKey, Duration.ofMinutes(2));
-        }
+        // elapsed: how far through the current minute we are, scaled ×1000
+        long elapsedScaled  = (System.currentTimeMillis() % 60_000) * 1000 / 60_000;
+        // maxCount scaled ×1000 to match the Lua integer arithmetic
+        long maxCountScaled = (long) MAX_TRANSFERS_PER_MINUTE * 1000;
 
-        long previousCount = Optional.ofNullable(
-                redisTemplate.opsForValue().get(previousKey))
-                .map(v -> Long.parseLong(v.toString()))
-                .orElse(0L);
+        List<String> keys = Arrays.asList(currentKey, previousKey);
+        Long allowed = stringRedisTemplate.execute(
+                RATE_LIMIT_SCRIPT, keys,
+                "120",                              // ARGV[1]: TTL seconds
+                String.valueOf(elapsedScaled),      // ARGV[2]: elapsed ×1000
+                String.valueOf(maxCountScaled));    // ARGV[3]: max ×1000
 
-        double elapsed = (System.currentTimeMillis() % 60000) / 60000.0;
-        double effectiveCount = currentCount + previousCount * (1 - elapsed);
-
-        if (effectiveCount > MAX_TRANSFERS_PER_MINUTE) {
+        if (allowed == null || allowed == 0L) {
             throw new BadRequestException(
                     "Transfer limit exceeded. Max 5 transfers per minute allowed");
         }
@@ -89,40 +132,31 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         // -----------------------------------------------------------------
-        // FIX – Consistent lock ordering to prevent deadlocks.
-        //
-        // Both sender and receiver wallets are loaded with a pessimistic
-        // write lock (SELECT ... FOR UPDATE).  Always acquiring locks in
-        // ascending wallet-ID order means two concurrent transfers between
-        // the same pair of wallets will never deadlock: the second
-        // transaction simply blocks on the first lock until the first
-        // transaction commits, then re-reads the up-to-date balance.
-        //
-        // Combined with the @Version field on Wallet, this gives two
-        // independent safety layers:
-        //   1. Pessimistic lock  – blocks other transactions at the DB level
-        //      while the current one is in flight (strongest guarantee).
-        //   2. Optimistic lock   – catches any slip-through at commit time
-        //      and surfaces it as HTTP 409 via GlobalExceptionHandler.
+        // Resolve the sender's wallet ID from their user ID first, then
+        // acquire pessimistic write locks on both wallets in ascending
+        // wallet-ID order to prevent deadlocks.
         // -----------------------------------------------------------------
-        Long firstId  = Math.min(senderUserId, request.getReceiverWalletId());
-        Long secondId = Math.max(senderUserId, request.getReceiverWalletId());
 
-        // Acquire locks in a deterministic order (lower ID first)
+        // Step 1: look up the sender wallet ID (no lock yet, just the ID)
+        Wallet senderWalletRef = walletRepository.findByUserId(senderUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sender wallet not found"));
+        Long senderWalletId = senderWalletRef.getId();
+        Long receiverWalletId = request.getReceiverWalletId();
+
+        // Step 2: acquire locks in a deterministic order (lower wallet ID first)
+        Long firstId  = Math.min(senderWalletId, receiverWalletId);
+        Long secondId = Math.max(senderWalletId, receiverWalletId);
+
         Wallet firstWallet = walletRepository.findByIdForUpdate(firstId)
-                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + firstId));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        firstId.equals(receiverWalletId) ? "Receiver wallet not found" : "Sender wallet not found"));
         Wallet secondWallet = walletRepository.findByIdForUpdate(secondId)
-                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + secondId));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        secondId.equals(receiverWalletId) ? "Receiver wallet not found" : "Sender wallet not found"));
 
-        // Map back to semantic roles after locking
-        Wallet senderWallet   = firstWallet.getId().equals(senderUserId) ? firstWallet  : secondWallet;
-        Wallet receiverWallet = firstWallet.getId().equals(senderUserId) ? secondWallet : firstWallet;
-
-        // NOTE: The above lock queries use wallet IDs directly.  The original
-        // code looked up the sender wallet by user ID and the receiver by
-        // wallet ID.  Adjust the lock query calls below if your data model
-        // requires it (e.g. replace findByIdForUpdate(senderUserId) with
-        // findByUserIdForUpdate(senderUserId) for the sender).
+        // Step 3: map back to semantic roles using wallet IDs (not user IDs)
+        Wallet senderWallet   = firstWallet.getId().equals(senderWalletId) ? firstWallet  : secondWallet;
+        Wallet receiverWallet = firstWallet.getId().equals(senderWalletId) ? secondWallet : firstWallet;
 
         // Validations
         if (senderWallet.getId().equals(receiverWallet.getId())) {
@@ -209,10 +243,10 @@ public class TransactionServiceImpl implements TransactionService {
 
             log.info("Transfer successful: {}", referenceId);
 
+        } catch (BadRequestException | ResourceNotFoundException e) {
+            log.error("Transfer failed: {}", e.getMessage());
+            throw e;
         } catch (Exception e) {
-            transaction.setStatus(TransactionStatus.FAILED);
-            transaction.setFailureReason(e.getMessage());
-            transactionRepository.save(transaction);
             log.error("Transfer failed: {}", e.getMessage());
             throw new BadRequestException("Transfer failed: " + e.getMessage());
         }
@@ -223,8 +257,6 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse deposit(Long userId, BigDecimal amount) {
-        // FIX: Use FOR UPDATE to prevent a concurrent withdrawal from reading
-        // the same balance and producing a negative result.
         Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
@@ -277,10 +309,10 @@ public class TransactionServiceImpl implements TransactionService {
 
             log.info("Deposit successful: {}", referenceId);
 
+        } catch (BadRequestException | ResourceNotFoundException e) {
+            log.error("Deposit failed: {}", e.getMessage());
+            throw e;
         } catch (Exception e) {
-            transaction.setStatus(TransactionStatus.FAILED);
-            transaction.setFailureReason(e.getMessage());
-            transactionRepository.save(transaction);
             log.error("Deposit failed: {}", e.getMessage());
             throw new BadRequestException("Deposit failed: " + e.getMessage());
         }
@@ -291,8 +323,6 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse withdraw(Long userId, BigDecimal amount) {
-        // FIX: Use FOR UPDATE so the balance read and the balance write are
-        // atomic with respect to other concurrent transactions on this wallet.
         Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
@@ -349,10 +379,10 @@ public class TransactionServiceImpl implements TransactionService {
 
             log.info("Withdrawal successful: {}", referenceId);
 
+        } catch (BadRequestException | ResourceNotFoundException e) {
+            log.error("Withdrawal failed: {}", e.getMessage());
+            throw e;
         } catch (Exception e) {
-            transaction.setStatus(TransactionStatus.FAILED);
-            transaction.setFailureReason(e.getMessage());
-            transactionRepository.save(transaction);
             log.error("Withdrawal failed: {}", e.getMessage());
             throw new BadRequestException("Withdrawal failed: " + e.getMessage());
         }

@@ -8,6 +8,7 @@ import com.paymentprocessing.wallet.ledger.repository.LedgerEntryRepository;
 import com.paymentprocessing.wallet.ledger.service.LedgerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
@@ -22,7 +23,7 @@ public class LedgerServiceImpl implements LedgerService {
     private final LedgerEntryRepository ledgerEntryRepository;
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, readOnly = false)
     public void recordDoubleEntry(String referenceId, String description,
                                   String debitAccountCode, String creditAccountCode,
                                   BigDecimal amount) {
@@ -64,7 +65,7 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, readOnly = false)
     public Account getOrCreateAccount(String code, String name, AccountType type) {
         return accountRepository.findByCode(code)
                 .orElseGet(() -> accountRepository.save(
