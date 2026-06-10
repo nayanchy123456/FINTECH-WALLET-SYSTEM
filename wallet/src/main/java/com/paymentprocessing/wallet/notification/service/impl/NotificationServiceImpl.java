@@ -8,6 +8,8 @@ import com.paymentprocessing.wallet.notification.repository.NotificationReposito
 import com.paymentprocessing.wallet.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.paymentprocessing.wallet.common.exception.BadRequestException;
@@ -57,6 +59,15 @@ public class NotificationServiceImpl implements NotificationService {
                     event.getReferenceId(),
                     "DEPOSIT"
             );
+        } else if (event.getType().equals("WITHDRAWAL")) {
+            createNotification(
+                    event.getSenderUserId(),
+                    "Withdrawal Successful",
+                    "Rs." + event.getAmount() +
+                    " withdrawn from your wallet. Reference: " + event.getReferenceId(),
+                    event.getReferenceId(),
+                    "WITHDRAWAL"
+            );
         }
     }
 
@@ -70,12 +81,26 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
+    public Page<NotificationResponse> getUserNotifications(Long userId, Pageable pageable) {
+        return notificationRepository
+                .findByUserIdOrderByCreatedAtDesc(userId, pageable)
+                .map(this::mapToResponse);
+    }
+
+    @Override
     public List<NotificationResponse> getUnreadNotifications(Long userId) {
         return notificationRepository
                 .findByUserIdAndStatus(userId, NotificationStatus.PENDING)
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public Page<NotificationResponse> getUnreadNotifications(Long userId, Pageable pageable) {
+        return notificationRepository
+                .findByUserIdAndStatus(userId, NotificationStatus.PENDING, pageable)
+                .map(this::mapToResponse);
     }
 
     /**

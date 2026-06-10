@@ -75,8 +75,10 @@ public class TransactionController {
     @GetMapping("/{referenceId}")
     public ResponseEntity<ApiResponse<TransactionResponse>> getByReferenceId(
             @PathVariable String referenceId) {
+        String email = SecurityUtil.getCurrentUserEmail();
+        User user = userService.findByEmail(email);
         TransactionResponse response = transactionService
-                .getTransactionByReferenceId(referenceId);
+                .getTransactionByReferenceId(referenceId, user.getId());
         return ResponseEntity.ok(ApiResponse.success(response,
                 "Transaction fetched successfully"));
     }
