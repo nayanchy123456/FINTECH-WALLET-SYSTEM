@@ -21,8 +21,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +31,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -393,15 +392,17 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public TransactionResponse getTransactionByReferenceId(String referenceId) {
         Transaction transaction = transactionRepository.findByReferenceId(referenceId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Transaction not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found"));
         return mapToResponse(transaction);
     }
 
     @Override
-    public Page<TransactionResponse> getTransactionHistory(
-            Long walletId, Pageable pageable) {
-        return transactionRepository.findByWalletId(walletId, pageable)
+    public Page<TransactionResponse> getTransactionHistory(Long userId, Pageable pageable) {
+        // Resolve walletId from userId here in the service layer, keeping
+        // the controller free of any repository dependency.
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
+        return transactionRepository.findByWalletId(wallet.getId(), pageable)
                 .map(this::mapToResponse);
     }
 

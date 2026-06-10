@@ -1,6 +1,5 @@
 package com.paymentprocessing.wallet.transaction.controller;
 
-import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
 import com.paymentprocessing.wallet.common.response.ApiResponse;
 import com.paymentprocessing.wallet.common.util.SecurityUtil;
 import com.paymentprocessing.wallet.transaction.dto.TransactionResponse;
@@ -8,9 +7,6 @@ import com.paymentprocessing.wallet.transaction.dto.TransferRequest;
 import com.paymentprocessing.wallet.transaction.service.TransactionService;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.service.UserService;
-import com.paymentprocessing.wallet.wallet.entity.Wallet;
-import com.paymentprocessing.wallet.wallet.repository.WalletRepository;
-
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
@@ -35,7 +31,6 @@ public class TransactionController {
 
     private final TransactionService transactionService;
     private final UserService userService;
-    private final WalletRepository walletRepository;
 
     @PostMapping("/transfer")
     public ResponseEntity<ApiResponse<TransactionResponse>> transfer(
@@ -70,11 +65,9 @@ public class TransactionController {
             @RequestParam(defaultValue = "10") int size) {
         String email = SecurityUtil.getCurrentUserEmail();
         User user = userService.findByEmail(email);
-        Wallet wallet = walletRepository.findByUserId(user.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
         Pageable pageable = PageRequest.of(page, size);
         Page<TransactionResponse> response = transactionService
-                .getTransactionHistory(wallet.getId(), pageable);
+                .getTransactionHistory(user.getId(), pageable);
         return ResponseEntity.ok(ApiResponse.success(response,
                 "Transaction history fetched successfully"));
     }

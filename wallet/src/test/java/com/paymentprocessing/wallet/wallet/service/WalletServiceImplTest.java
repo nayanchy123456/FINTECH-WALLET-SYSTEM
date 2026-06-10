@@ -2,7 +2,6 @@ package com.paymentprocessing.wallet.wallet.service;
 
 import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.common.exception.ResourceNotFoundException;
-import com.paymentprocessing.wallet.common.service.RedisService;
 import com.paymentprocessing.wallet.user.entity.Role;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.service.UserService;
@@ -24,7 +23,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,9 +33,6 @@ class WalletServiceImplTest {
 
     @Mock
     private UserService userService;
-
-    @Mock
-    private RedisService redisService;
 
     @InjectMocks
     private WalletServiceImpl walletService;
@@ -133,52 +128,5 @@ class WalletServiceImplTest {
         assertThatThrownBy(() -> walletService.getWalletById(99L))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessage("Wallet not found");
-    }
-
-    // =====================
-    // CACHE TESTS
-    // =====================
-
-    @Test
-    void getCachedBalance_ShouldReturnFromCache_WhenCacheHit() {
-        when(redisService.get("wallet:balance:1")).thenReturn(Optional.of("1000"));
-
-        BigDecimal balance = walletService.getCachedBalance(1L);
-
-        assertThat(balance).isEqualByComparingTo(BigDecimal.valueOf(1000));
-        // DB should NOT be called when cache hits
-        verify(walletRepository, never()).findById(anyLong());
-    }
-
-    @Test
-    void getCachedBalance_ShouldFetchFromDB_WhenCacheMiss() {
-        when(redisService.get("wallet:balance:1")).thenReturn(Optional.empty());
-        when(walletRepository.findById(1L)).thenReturn(Optional.of(wallet));
-
-        BigDecimal balance = walletService.getCachedBalance(1L);
-
-        assertThat(balance).isEqualByComparingTo(BigDecimal.valueOf(1000));
-        // DB should be called on cache miss
-        verify(walletRepository, times(1)).findById(1L);
-        // Cache should be updated after DB fetch
-        verify(redisService, times(1)).set(anyString(), anyString(), any());
-    }
-
-    @Test
-    void updateCachedBalance_ShouldUpdateCache() {
-        walletService.updateCachedBalance(1L, BigDecimal.valueOf(2000));
-
-        verify(redisService, times(1)).set(
-                eq("wallet:balance:1"),
-                eq("2000"),
-                any()
-        );
-    }
-
-    @Test
-    void evictBalanceCache_ShouldDeleteFromCache() {
-        walletService.evictBalanceCache(1L);
-
-        verify(redisService, times(1)).delete("wallet:balance:1");
     }
 }

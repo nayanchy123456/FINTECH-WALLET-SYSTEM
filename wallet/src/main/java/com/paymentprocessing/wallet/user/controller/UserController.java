@@ -1,18 +1,16 @@
 package com.paymentprocessing.wallet.user.controller;
 
+import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.common.response.ApiResponse;
 import com.paymentprocessing.wallet.common.util.SecurityUtil;
 import com.paymentprocessing.wallet.user.dto.UpdateProfileRequest;
 import com.paymentprocessing.wallet.user.dto.UserResponse;
+import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.service.UserService;
-
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import com.paymentprocessing.wallet.user.dto.UpdateProfileRequest;
-import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api/users")
@@ -28,17 +26,28 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response, "Profile fetched successfully"));
     }
 
-
     @PatchMapping("/profile")
-public ResponseEntity<ApiResponse<UserResponse>> updateProfile(
-        @Valid @RequestBody UpdateProfileRequest request) {
-    String email = SecurityUtil.getCurrentUserEmail();
-    UserResponse response = userService.updateProfile(email, request);
-    return ResponseEntity.ok(ApiResponse.success(response, "Profile updated successfully"));
-}
+    public ResponseEntity<ApiResponse<UserResponse>> updateProfile(
+            @Valid @RequestBody UpdateProfileRequest request) {
+        String email = SecurityUtil.getCurrentUserEmail();
+        UserResponse response = userService.updateProfile(email, request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Profile updated successfully"));
+    }
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<UserResponse>> getUserById(@PathVariable Long id) {
+        // Ownership check — only the authenticated user may fetch their own
+        // record through this endpoint. If admin-only access is needed in the
+        // future, replace this block with @PreAuthorize("hasRole('ADMIN')")
+        // and enable method security in SecurityConfig.
+        String email = SecurityUtil.getCurrentUserEmail();
+        User currentUser = userService.findByEmail(email);
+
+        if (!currentUser.getId().equals(id)) {
+            throw new BadRequestException(
+                    "Access denied: you can only view your own profile");
+        }
+
         UserResponse response = userService.getUserById(id);
         return ResponseEntity.ok(ApiResponse.success(response, "User fetched successfully"));
     }

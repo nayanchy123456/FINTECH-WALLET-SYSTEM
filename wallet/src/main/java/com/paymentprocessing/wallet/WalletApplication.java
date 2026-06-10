@@ -9,6 +9,5 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 public class WalletApplication {
     public static void main(String[] args) {
         SpringApplication.run(WalletApplication.class, args);
-		System.out.println("program is running successfully");
     }
 }

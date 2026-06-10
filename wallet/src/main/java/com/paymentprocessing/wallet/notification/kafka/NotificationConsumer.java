@@ -4,7 +4,6 @@ import com.paymentprocessing.wallet.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -29,13 +28,15 @@ public class NotificationConsumer {
         log.info("Received transaction event: {} from partition: {} offset: {}",
                 event.getReferenceId(), partition, offset);
 
-        try {
-            notificationService.processTransactionEvent(event);
-            log.info("Transaction event processed successfully: {}",
-                    event.getReferenceId());
-        } catch (Exception e) {
-            log.error("Failed to process transaction event: {}",
-                    event.getReferenceId(), e);
-        }
+        // No try/catch here — exceptions must propagate to Spring Kafka's
+        // DefaultErrorHandler so that the configured retry backoff fires and,
+        // after MAX_ATTEMPTS are exhausted, the message is forwarded to the
+        // DLQ by DeadLetterPublishingRecoverer (see KafkaErrorConfig).
+        // Catching the exception here would silently ack the message and
+        // bypass the entire retry + DLQ pipeline.
+        notificationService.processTransactionEvent(event);
+
+        log.info("Transaction event processed successfully: {}",
+                event.getReferenceId());
     }
 }
