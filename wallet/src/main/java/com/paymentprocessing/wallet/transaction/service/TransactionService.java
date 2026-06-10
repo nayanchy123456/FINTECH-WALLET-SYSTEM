@@ -11,5 +11,7 @@ public interface TransactionService {
     TransactionResponse deposit(Long userId, BigDecimal amount);
     TransactionResponse withdraw(Long userId, BigDecimal amount);
     TransactionResponse getTransactionByReferenceId(String referenceId);
-    Page<TransactionResponse> getTransactionHistory(Long walletId, Pageable pageable);
+    // Takes userId — the service is responsible for resolving the wallet internally.
+    // Controllers must never reach into WalletRepository directly.
+    Page<TransactionResponse> getTransactionHistory(Long userId, Pageable pageable);
 }

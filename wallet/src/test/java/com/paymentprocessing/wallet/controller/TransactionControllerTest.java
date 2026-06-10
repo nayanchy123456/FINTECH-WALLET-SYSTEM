@@ -1,7 +1,6 @@
 package com.paymentprocessing.wallet.controller;
 
 import com.paymentprocessing.wallet.integration.IntegrationTestBase;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentprocessing.wallet.auth.security.JwtService;
 import com.paymentprocessing.wallet.common.exception.BadRequestException;
@@ -14,17 +13,11 @@ import com.paymentprocessing.wallet.user.entity.Role;
 import com.paymentprocessing.wallet.user.entity.User;
 import com.paymentprocessing.wallet.user.repository.UserRepository;
 import com.paymentprocessing.wallet.user.service.UserService;
-import com.paymentprocessing.wallet.wallet.entity.Wallet;
-import com.paymentprocessing.wallet.wallet.entity.WalletStatus;
-import com.paymentprocessing.wallet.wallet.repository.WalletRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-
-
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
-
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -34,9 +27,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-
-
-
 
 class TransactionControllerTest extends IntegrationTestBase {
 
@@ -53,14 +43,10 @@ class TransactionControllerTest extends IntegrationTestBase {
     private UserService userService;
 
     @MockBean
-    private WalletRepository walletRepository;
-
-    @MockBean
     private UserRepository userRepository;
 
     private String validToken;
     private User mockUser;
-    private Wallet mockWallet;
     private TransactionResponse mockTransactionResponse;
 
     @BeforeEach
@@ -72,13 +58,6 @@ class TransactionControllerTest extends IntegrationTestBase {
                 .role(Role.USER)
                 .build();
         mockUser.setId(1L);
-
-        mockWallet = Wallet.builder()
-                .user(mockUser)
-                .balance(BigDecimal.valueOf(1000))
-                .status(WalletStatus.ACTIVE)
-                .build();
-        mockWallet.setId(1L);
 
         mockTransactionResponse = TransactionResponse.builder()
                 .id(1L)
@@ -94,7 +73,6 @@ class TransactionControllerTest extends IntegrationTestBase {
 
         when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(mockUser));
         when(userService.findByEmail("john@example.com")).thenReturn(mockUser);
-        when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(mockWallet));
     }
 
     // =====================
