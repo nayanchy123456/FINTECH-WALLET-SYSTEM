@@ -3,6 +3,7 @@ package com.paymentprocessing.wallet.auth.service.impl;
 import com.paymentprocessing.wallet.auth.dto.*;
 import com.paymentprocessing.wallet.auth.security.JwtService;
 import com.paymentprocessing.wallet.auth.service.AuthService;
+import com.paymentprocessing.wallet.auth.service.TokenBlacklistService;
 import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.user.entity.Role;
 import com.paymentprocessing.wallet.user.entity.User;
@@ -24,6 +25,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
     private final WalletService walletService;
+    private final TokenBlacklistService tokenBlacklistService;
 
     @Override
     @Transactional
@@ -76,5 +78,10 @@ public class AuthServiceImpl implements AuthService {
                 .fullName(user.getFullName())
                 .role(user.getRole().name())
                 .build();
+    }
+
+    @Override
+    public void logout(String token) {
+        tokenBlacklistService.blacklist(token);
     }
 }

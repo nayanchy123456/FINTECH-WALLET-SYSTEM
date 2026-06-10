@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.time.Duration;
 import java.util.Date;
 
 @Service
@@ -46,6 +47,25 @@ public class JwtService {
         } catch (JwtException e) {
             return false;
         }
+    }
+
+    public Date extractExpiration(String token) {
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getExpiration();
+    }
+
+    /**
+     * Returns how long until the token expires.
+     * Returns a negative duration if the token is already expired.
+     */
+    public Duration getRemainingTtl(String token) {
+        Date expiration = extractExpiration(token);
+        long millisRemaining = expiration.getTime() - System.currentTimeMillis();
+        return Duration.ofMillis(millisRemaining);
     }
 
     private SecretKey getSigningKey() {
