@@ -27,6 +27,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.math.BigDecimal;
@@ -57,6 +58,9 @@ class TransactionServiceImplTest {
 
     @Mock
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
 
     @Mock
     private ValueOperations<String, Object> valueOperations;
@@ -122,7 +126,8 @@ class TransactionServiceImplTest {
                 .build();
         transaction.setId(1L);
 
-        // Mock Redis rate limiting for all tests
+        // Mock rate limiter Lua script via stringRedisTemplate (returning 1L = allowed)
+        when(stringRedisTemplate.execute(any(), any(java.util.List.class), any(Object[].class))).thenReturn(1L);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.increment(anyString())).thenReturn(1L);
         when(redisTemplate.opsForValue().get(anyString())).thenReturn(null);
@@ -136,7 +141,8 @@ class TransactionServiceImplTest {
     void transfer_ShouldSucceed_WhenValidRequest() {
         when(redisService.exists(anyString())).thenReturn(false);
         when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
-        when(walletRepository.findById(2L)).thenReturn(Optional.of(receiverWallet));
+        when(walletRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(receiverWallet));
         when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
 
         TransactionResponse response = transactionService.transfer(1L, transferRequest);
@@ -145,10 +151,7 @@ class TransactionServiceImplTest {
         assertThat(response.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(200));
         assertThat(response.getStatus()).isEqualTo(TransactionStatus.SUCCESS);
 
-        // Verify balances were updated
         verify(walletRepository, atLeast(2)).save(any(Wallet.class));
-
-        // Verify Kafka event was published
         verify(notificationProducer, times(1)).sendTransactionEvent(any());
     }
 
@@ -158,7 +161,8 @@ class TransactionServiceImplTest {
 
         when(redisService.exists(anyString())).thenReturn(false);
         when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
-        when(walletRepository.findById(2L)).thenReturn(Optional.of(receiverWallet));
+        when(walletRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(receiverWallet));
         when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
 
         assertThatThrownBy(() -> transactionService.transfer(1L, transferRequest))
@@ -178,7 +182,8 @@ class TransactionServiceImplTest {
     @Test
     void transfer_ShouldThrowException_WhenReceiverWalletNotFound() {
         when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
-        when(walletRepository.findById(anyLong())).thenReturn(Optional.empty());
+        when(walletRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByIdForUpdate(2L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> transactionService.transfer(1L, transferRequest))
                 .isInstanceOf(ResourceNotFoundException.class)
@@ -191,7 +196,8 @@ class TransactionServiceImplTest {
 
         when(redisService.exists(anyString())).thenReturn(false);
         when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
-        when(walletRepository.findById(2L)).thenReturn(Optional.of(receiverWallet));
+        when(walletRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(receiverWallet));
         when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
 
         assertThatThrownBy(() -> transactionService.transfer(1L, transferRequest))
@@ -205,7 +211,7 @@ class TransactionServiceImplTest {
 
         when(redisService.exists(anyString())).thenReturn(false);
         when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
-        when(walletRepository.findById(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
         when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
 
         assertThatThrownBy(() -> transactionService.transfer(1L, transferRequest))
@@ -228,7 +234,6 @@ class TransactionServiceImplTest {
         assertThat(response).isNotNull();
         assertThat(response.getReferenceId()).isEqualTo("test-ref-123");
 
-        // Verify no new wallets were touched
         verify(walletRepository, never()).findByUserId(anyLong());
     }
 
@@ -238,7 +243,7 @@ class TransactionServiceImplTest {
 
     @Test
     void deposit_ShouldSucceed_WhenValidRequest() {
-        when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
+        when(walletRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(senderWallet));
         when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
 
         TransactionResponse response = transactionService.deposit(1L, BigDecimal.valueOf(500));
@@ -250,7 +255,7 @@ class TransactionServiceImplTest {
 
     @Test
     void deposit_ShouldThrowException_WhenWalletNotFound() {
-        when(walletRepository.findByUserId(anyLong())).thenReturn(Optional.empty());
+        when(walletRepository.findByUserIdForUpdate(anyLong())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> transactionService.deposit(99L, BigDecimal.valueOf(500)))
                 .isInstanceOf(ResourceNotFoundException.class)
