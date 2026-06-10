@@ -22,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,7 +42,6 @@ public class TransactionServiceImpl implements TransactionService {
     private final WalletRepository walletRepository;
     private final LedgerService ledgerService;
     private final RedisService redisService;
-    private final RedisTemplate<String, Object> redisTemplate;
     // StringRedisTemplate uses plain string serialization — required for INCR
     // to work correctly. GenericJackson2JsonRedisSerializer wraps values in JSON,
     // making them non-integer and causing Redis to reject INCR with an error.
@@ -126,7 +124,7 @@ public class TransactionServiceImpl implements TransactionService {
                         .map(Object::toString)
                         .orElse(null);
                 log.info("Duplicate request detected, returning existing transaction");
-                return getTransactionByReferenceId(existingRefId);
+                return getTransactionByReferenceId(existingRefId, senderUserId);
             }
         }
 
@@ -245,9 +243,6 @@ public class TransactionServiceImpl implements TransactionService {
         } catch (BadRequestException | ResourceNotFoundException e) {
             log.error("Transfer failed: {}", e.getMessage());
             throw e;
-        } catch (Exception e) {
-            log.error("Transfer failed: {}", e.getMessage());
-            throw new BadRequestException("Transfer failed: " + e.getMessage());
         }
 
         return mapToResponse(transaction);
@@ -311,9 +306,6 @@ public class TransactionServiceImpl implements TransactionService {
         } catch (BadRequestException | ResourceNotFoundException e) {
             log.error("Deposit failed: {}", e.getMessage());
             throw e;
-        } catch (Exception e) {
-            log.error("Deposit failed: {}", e.getMessage());
-            throw new BadRequestException("Deposit failed: " + e.getMessage());
         }
 
         return mapToResponse(transaction);
@@ -381,18 +373,23 @@ public class TransactionServiceImpl implements TransactionService {
         } catch (BadRequestException | ResourceNotFoundException e) {
             log.error("Withdrawal failed: {}", e.getMessage());
             throw e;
-        } catch (Exception e) {
-            log.error("Withdrawal failed: {}", e.getMessage());
-            throw new BadRequestException("Withdrawal failed: " + e.getMessage());
         }
 
         return mapToResponse(transaction);
     }
 
     @Override
-    public TransactionResponse getTransactionByReferenceId(String referenceId) {
+    public TransactionResponse getTransactionByReferenceId(String referenceId, Long userId) {
         Transaction transaction = transactionRepository.findByReferenceId(referenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found"));
+
+        Long senderUserId   = transaction.getSenderWallet()   != null ? transaction.getSenderWallet().getUser().getId()   : null;
+        Long receiverUserId = transaction.getReceiverWallet() != null ? transaction.getReceiverWallet().getUser().getId() : null;
+
+        if (!userId.equals(senderUserId) && !userId.equals(receiverUserId)) {
+            throw new ResourceNotFoundException("Transaction not found");
+        }
+
         return mapToResponse(transaction);
     }
 

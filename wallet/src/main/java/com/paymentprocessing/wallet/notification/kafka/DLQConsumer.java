@@ -1,5 +1,6 @@
 package com.paymentprocessing.wallet.notification.kafka;
 
+import com.paymentprocessing.wallet.notification.kafka.KafkaTopicConfig;
 import com.paymentprocessing.wallet.notification.entity.FailedMessage;
 import com.paymentprocessing.wallet.notification.entity.FailedMessageStatus;
 import com.paymentprocessing.wallet.notification.repository.FailedMessageRepository;
@@ -19,7 +20,7 @@ public class DLQConsumer {
     private final FailedMessageRepository failedMessageRepository;
 
     @KafkaListener(
-            topics = "transaction.created.DLQ",
+            topics = KafkaTopicConfig.TRANSACTION_DLQ,
             groupId = "wallet-dlq-group"
     )
     public void consumeDeadLetter(
