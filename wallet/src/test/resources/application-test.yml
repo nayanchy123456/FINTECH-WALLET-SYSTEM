@@ -40,3 +40,8 @@ application:
 
 server:
   port: 0
+
+# Disable rate limiting in tests by using a very high limit
+app:
+  rate-limit:
+    max-per-minute: 1000

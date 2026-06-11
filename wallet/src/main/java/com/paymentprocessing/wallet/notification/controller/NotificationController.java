@@ -9,7 +9,6 @@ import com.paymentprocessing.wallet.user.service.UserService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -26,27 +25,27 @@ public class NotificationController {
     private final UserService userService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Page<NotificationResponse>>> getMyNotifications(
+    public ResponseEntity<ApiResponse<List<NotificationResponse>>> getMyNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         String email = SecurityUtil.getCurrentUserEmail();
         User user = userService.findByEmail(email);
         Pageable pageable = PageRequest.of(page, size);
-        Page<NotificationResponse> response =
-                notificationService.getUserNotifications(user.getId(), pageable);
+        List<NotificationResponse> response =
+                notificationService.getUserNotifications(user.getId(), pageable).getContent();
         return ResponseEntity.ok(ApiResponse.success(response,
                 "Notifications fetched successfully"));
     }
 
     @GetMapping("/unread")
-    public ResponseEntity<ApiResponse<Page<NotificationResponse>>> getUnreadNotifications(
+    public ResponseEntity<ApiResponse<List<NotificationResponse>>> getUnreadNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         String email = SecurityUtil.getCurrentUserEmail();
         User user = userService.findByEmail(email);
         Pageable pageable = PageRequest.of(page, size);
-        Page<NotificationResponse> response =
-                notificationService.getUnreadNotifications(user.getId(), pageable);
+        List<NotificationResponse> response =
+                notificationService.getUnreadNotifications(user.getId(), pageable).getContent();
         return ResponseEntity.ok(ApiResponse.success(response,
                 "Unread notifications fetched successfully"));
     }

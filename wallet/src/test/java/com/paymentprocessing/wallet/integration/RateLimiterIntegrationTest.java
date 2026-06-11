@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.Map;
@@ -16,6 +18,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @DisplayName("Rate Limiter Integration Tests")
+@TestPropertySource(properties = "app.rate-limit.max-per-minute=5")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class RateLimiterIntegrationTest extends IntegrationTestBase {
 
     @Autowired
@@ -78,18 +82,25 @@ class RateLimiterIntegrationTest extends IntegrationTestBase {
         receiverWalletId = objectMapper.readTree(walletResult.getResponse().getContentAsString())
                 .path("data").path("id").asLong();
 
-        // Clear any leftover rate limit keys for this sender before the test
-        Set<String> keys = redisTemplate.keys("rate:limit:transfer:" + senderUserId + ":*");
-        if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
-        }
+        // Clear all rate-limit keys for this sender before every test
+        clearRateLimitKeys("rate:limit:transfer:" + senderUserId + ":*");
+        clearRateLimitKeys("rate:limit:deposit:"  + senderUserId + ":*");
+        clearRateLimitKeys("rate:limit:withdraw:" + senderUserId + ":*");
 
-        // Give sender enough balance for all transfers
+        // Give sender enough balance for all transfers and withdrawals
         mockMvc.perform(post("/api/transactions/deposit")
                         .param("amount", "5000.00")
                         .header("Authorization", "Bearer " + senderToken))
                 .andExpect(status().isOk());
+
+        // Clear the deposit rate-limit counter that was just incremented by the
+        // seed deposit above, so tests start from a clean slate.
+        clearRateLimitKeys("rate:limit:deposit:" + senderUserId + ":*");
     }
+
+    // -----------------------------------------------------------------------
+    // Transfer
+    // -----------------------------------------------------------------------
 
     @Test
     @DisplayName("First 5 transfers succeed — 6th is blocked by rate limiter")
@@ -118,5 +129,90 @@ class RateLimiterIntegrationTest extends IntegrationTestBase {
                                 "description", "Should be blocked"
                         ))))
                 .andExpect(status().isBadRequest());
+    }
+
+    // -----------------------------------------------------------------------
+    // Deposit
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("First 5 deposits succeed — 6th is blocked by rate limiter")
+    void rateLimiter_ShouldBlock_After5DepositsPerMinute() throws Exception {
+
+        // First 5 deposits — all should succeed
+        for (int i = 1; i <= 5; i++) {
+            mockMvc.perform(post("/api/transactions/deposit")
+                            .param("amount", "10.00")
+                            .header("Authorization", "Bearer " + senderToken))
+                    .andExpect(status().isOk());
+        }
+
+        // 6th deposit — should be blocked
+        mockMvc.perform(post("/api/transactions/deposit")
+                        .param("amount", "10.00")
+                        .header("Authorization", "Bearer " + senderToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    // -----------------------------------------------------------------------
+    // Withdraw
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("First 5 withdrawals succeed — 6th is blocked by rate limiter")
+    void rateLimiter_ShouldBlock_After5WithdrawalsPerMinute() throws Exception {
+
+        // First 5 withdrawals — all should succeed
+        for (int i = 1; i <= 5; i++) {
+            mockMvc.perform(post("/api/transactions/withdraw")
+                            .param("amount", "10.00")
+                            .header("Authorization", "Bearer " + senderToken))
+                    .andExpect(status().isOk());
+        }
+
+        // 6th withdrawal — should be blocked
+        mockMvc.perform(post("/api/transactions/withdraw")
+                        .param("amount", "10.00")
+                        .header("Authorization", "Bearer " + senderToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    // -----------------------------------------------------------------------
+    // Cross-operation isolation
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Deposit and withdraw limits are independent — exhausting one does not block the other")
+    void rateLimiter_DepositAndWithdrawLimits_AreIndependent() throws Exception {
+
+        // Exhaust the deposit limit
+        for (int i = 1; i <= 5; i++) {
+            mockMvc.perform(post("/api/transactions/deposit")
+                            .param("amount", "10.00")
+                            .header("Authorization", "Bearer " + senderToken))
+                    .andExpect(status().isOk());
+        }
+        // 6th deposit must be blocked
+        mockMvc.perform(post("/api/transactions/deposit")
+                        .param("amount", "10.00")
+                        .header("Authorization", "Bearer " + senderToken))
+                .andExpect(status().isBadRequest());
+
+        // Withdraw limit is independent — first call should still succeed
+        mockMvc.perform(post("/api/transactions/withdraw")
+                        .param("amount", "10.00")
+                        .header("Authorization", "Bearer " + senderToken))
+                .andExpect(status().isOk());
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper
+    // -----------------------------------------------------------------------
+
+    private void clearRateLimitKeys(String pattern) {
+        Set<String> keys = redisTemplate.keys(pattern);
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
     }
 }

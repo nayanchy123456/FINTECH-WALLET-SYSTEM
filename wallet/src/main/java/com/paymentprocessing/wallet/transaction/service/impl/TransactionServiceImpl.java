@@ -17,8 +17,8 @@ import com.paymentprocessing.wallet.transaction.service.TransactionService;
 import com.paymentprocessing.wallet.wallet.entity.Wallet;
 import com.paymentprocessing.wallet.wallet.entity.WalletStatus;
 import com.paymentprocessing.wallet.wallet.repository.WalletRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -32,9 +32,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
+
 @Slf4j
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class TransactionServiceImpl implements TransactionService {
 
@@ -48,9 +49,33 @@ public class TransactionServiceImpl implements TransactionService {
     private final StringRedisTemplate stringRedisTemplate;
     private final NotificationProducer notificationProducer;
 
+    @Value("${app.rate-limit.max-per-minute:5}")
+    private int maxOperationsPerMinute;
+
+    public TransactionServiceImpl(TransactionRepository transactionRepository,
+                                   WalletRepository walletRepository,
+                                   LedgerService ledgerService,
+                                   RedisService redisService,
+                                   StringRedisTemplate stringRedisTemplate,
+                                   NotificationProducer notificationProducer) {
+        this.transactionRepository = transactionRepository;
+        this.walletRepository = walletRepository;
+        this.ledgerService = ledgerService;
+        this.redisService = redisService;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.notificationProducer = notificationProducer;
+    }
+
     private static final String IDEMPOTENCY_KEY = "idempotency:";
-    private static final String RATE_LIMIT_KEY = "rate:limit:transfer:";
-    private static final int MAX_TRANSFERS_PER_MINUTE = 5;
+
+    // -----------------------------------------------------------------------
+    // Rate-limit configuration
+    // Each operation gets its own Redis key namespace so limits are tracked
+    // independently.  All three share the same sliding-window algorithm.
+    // -----------------------------------------------------------------------
+    private static final String RATE_LIMIT_KEY_TRANSFER  = "rate:limit:transfer:";
+    private static final String RATE_LIMIT_KEY_DEPOSIT   = "rate:limit:deposit:";
+    private static final String RATE_LIMIT_KEY_WITHDRAW  = "rate:limit:withdraw:";
 
     /**
      * Lua script for an atomic sliding-window rate-limit check-and-increment.
@@ -85,24 +110,31 @@ public class TransactionServiceImpl implements TransactionService {
         );
     }
 
-    @Override
-    @Transactional
-    public TransactionResponse transfer(Long senderUserId, TransferRequest request) {
+    // -----------------------------------------------------------------------
+    // Shared rate-limit helper
+    // -----------------------------------------------------------------------
 
-        // Sliding Window Counter Rate Limiting – atomic via Lua script.
-        // Executed via stringRedisTemplate so counter values are stored as
-        // plain integers (required for INCR). The JSON-serializing redisTemplate
-        // must NOT be used here.
+    /**
+     * Applies a sliding-window rate-limit check for the given user and
+     * operation.  Throws {@link BadRequestException} when the limit is
+     * exceeded; does nothing (returns) when the request is allowed.
+     *
+     * @param userId       the authenticated user's ID
+     * @param keyPrefix    Redis key namespace, e.g. {@code "rate:limit:deposit:"}
+     * @param maxPerMinute maximum calls allowed per 60-second window
+     * @param opName       human-readable operation name used in the error message
+     */
+    private void checkRateLimit(Long userId, String keyPrefix, int maxPerMinute, String opName) {
         long currentWindow  = System.currentTimeMillis() / 1000 / 60;
         long previousWindow = currentWindow - 1;
 
-        String currentKey  = RATE_LIMIT_KEY + senderUserId + ":" + currentWindow;
-        String previousKey = RATE_LIMIT_KEY + senderUserId + ":" + previousWindow;
+        String currentKey  = keyPrefix + userId + ":" + currentWindow;
+        String previousKey = keyPrefix + userId + ":" + previousWindow;
 
         // elapsed: how far through the current minute we are, scaled ×1000
         long elapsedScaled  = (System.currentTimeMillis() % 60_000) * 1000 / 60_000;
         // maxCount scaled ×1000 to match the Lua integer arithmetic
-        long maxCountScaled = (long) MAX_TRANSFERS_PER_MINUTE * 1000;
+        long maxCountScaled = (long) maxPerMinute * 1000;
 
         List<String> keys = Arrays.asList(currentKey, previousKey);
         Long allowed = stringRedisTemplate.execute(
@@ -113,8 +145,23 @@ public class TransactionServiceImpl implements TransactionService {
 
         if (allowed == null || allowed == 0L) {
             throw new BadRequestException(
-                    "Transfer limit exceeded. Max 5 transfers per minute allowed");
+                    opName + " limit exceeded. Max " + maxPerMinute +
+                    " " + opName.toLowerCase() + "s per minute allowed");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Public operations
+    // -----------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public TransactionResponse transfer(Long senderUserId, TransferRequest request) {
+
+        // Sliding Window Counter Rate Limiting — atomic via Lua script.
+        // Executed via stringRedisTemplate so counter values are stored as
+        // plain integers (required for INCR).
+        checkRateLimit(senderUserId, RATE_LIMIT_KEY_TRANSFER, maxOperationsPerMinute, "Transfer");
 
         // Idempotency check
         if (request.getIdempotencyKey() != null) {
@@ -251,6 +298,10 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse deposit(Long userId, BigDecimal amount) {
+
+        // Sliding Window Counter Rate Limiting — same guard as transfer/withdraw.
+        checkRateLimit(userId, RATE_LIMIT_KEY_DEPOSIT, maxOperationsPerMinute, "Deposit");
+
         Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
@@ -314,6 +365,10 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse withdraw(Long userId, BigDecimal amount) {
+
+        // Sliding Window Counter Rate Limiting — same guard as transfer/deposit.
+        checkRateLimit(userId, RATE_LIMIT_KEY_WITHDRAW, maxOperationsPerMinute, "Withdrawal");
+
         Wallet wallet = walletRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 

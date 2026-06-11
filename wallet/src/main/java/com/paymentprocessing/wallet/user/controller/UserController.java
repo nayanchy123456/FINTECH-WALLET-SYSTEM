@@ -26,6 +26,12 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response, "Profile fetched successfully"));
     }
 
+    // Alias so both /api/users/me and /api/users/profile work
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> getMe() {
+        return getProfile();
+    }
+
     @PatchMapping("/profile")
     public ResponseEntity<ApiResponse<UserResponse>> updateProfile(
             @Valid @RequestBody UpdateProfileRequest request) {
@@ -36,19 +42,16 @@ public class UserController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<UserResponse>> getUserById(@PathVariable Long id) {
-        // Ownership check — only the authenticated user may fetch their own
-        // record through this endpoint. If admin-only access is needed in the
-        // future, replace this block with @PreAuthorize("hasRole('ADMIN')")
-        // and enable method security in SecurityConfig.
+        // Fetch first — throws ResourceNotFoundException (404) if not found
+        UserResponse response = userService.getUserById(id);
+
+        // Ownership check — only the authenticated user may fetch their own record
         String email = SecurityUtil.getCurrentUserEmail();
         User currentUser = userService.findByEmail(email);
-
         if (!currentUser.getId().equals(id)) {
-            throw new BadRequestException(
-                    "Access denied: you can only view your own profile");
+            throw new BadRequestException("Access denied: you can only view your own profile");
         }
 
-        UserResponse response = userService.getUserById(id);
         return ResponseEntity.ok(ApiResponse.success(response, "User fetched successfully"));
     }
 }
