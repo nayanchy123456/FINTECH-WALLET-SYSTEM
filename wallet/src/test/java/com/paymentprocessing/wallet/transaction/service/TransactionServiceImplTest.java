@@ -269,6 +269,7 @@ class TransactionServiceImplTest {
     @Test
     void getTransactionHistory_ShouldReturnPage_WhenExists() {
         Page<Transaction> page = new PageImpl<>(List.of(transaction));
+        when(walletRepository.findByUserId(1L)).thenReturn(Optional.of(senderWallet));
         when(transactionRepository.findByWalletId(anyLong(), any(PageRequest.class)))
                 .thenReturn(page);
 

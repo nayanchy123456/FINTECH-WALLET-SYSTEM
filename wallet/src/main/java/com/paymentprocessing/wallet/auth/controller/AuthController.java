@@ -1,7 +1,9 @@
 package com.paymentprocessing.wallet.auth.controller;
 
 import com.paymentprocessing.wallet.auth.dto.*;
+import com.paymentprocessing.wallet.auth.security.JwtService;
 import com.paymentprocessing.wallet.auth.service.AuthService;
+import com.paymentprocessing.wallet.common.exception.BadRequestException;
 import com.paymentprocessing.wallet.common.response.ApiResponse;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final JwtService jwtService;
 
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<AuthResponse>> register(
@@ -35,10 +38,15 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(
             @RequestHeader("Authorization") String authHeader) {
-        // Strip "Bearer " prefix
         String token = authHeader.startsWith("Bearer ")
                 ? authHeader.substring(7)
                 : authHeader;
+
+        // Reject malformed / invalid tokens — they were never issued by us
+        if (!jwtService.isTokenValid(token)) {
+            throw new BadRequestException("Invalid or malformed token");
+        }
+
         authService.logout(token);
         return ResponseEntity.ok(ApiResponse.success(null, "Logged out successfully"));
     }

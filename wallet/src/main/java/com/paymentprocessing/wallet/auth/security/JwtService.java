@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.time.Duration;
 import java.util.Date;
+import java.util.UUID;
 
 @Service
 public class JwtService {
@@ -22,6 +23,7 @@ public class JwtService {
     public String generateToken(String email) {
         return Jwts.builder()
                 .subject(email)
+                .id(UUID.randomUUID().toString())   // unique jti — prevents token reuse after logout
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())

@@ -21,7 +21,14 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
 
     @Override
     public void blacklist(String token) {
-        Duration ttl = jwtService.getRemainingTtl(token);
+        Duration ttl;
+        try {
+            ttl = jwtService.getRemainingTtl(token);
+        } catch (Exception e) {
+            // Malformed or already-expired token — nothing to blacklist
+            log.debug("Cannot blacklist token (malformed or expired): {}", e.getMessage());
+            return;
+        }
         if (ttl.isNegative() || ttl.isZero()) {
             // Token is already expired — no need to store it
             log.debug("Token already expired, skipping blacklist entry");
