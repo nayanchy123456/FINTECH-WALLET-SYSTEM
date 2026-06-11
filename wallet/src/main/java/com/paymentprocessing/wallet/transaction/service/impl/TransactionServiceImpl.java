@@ -32,8 +32,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
-
 @Slf4j
 @Service
 @Transactional(readOnly = true)
