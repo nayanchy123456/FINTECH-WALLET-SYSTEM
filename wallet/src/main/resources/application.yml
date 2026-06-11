@@ -45,7 +45,7 @@ application:
 server:
   port: 8080
 
-  springdoc:
+springdoc:
   api-docs:
     enabled: true
     path: /v3/api-docs
@@ -53,6 +53,7 @@ server:
     enabled: true
     path: /swagger-ui.html
   packages-to-scan: com.paymentprocessing.wallet
+
 logging:
   level:
     org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer: ERROR
