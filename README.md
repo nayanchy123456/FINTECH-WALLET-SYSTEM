@@ -4,7 +4,7 @@
 
 <p>
   <strong>A production-grade digital wallet backend built with Spring Boot 3.x</strong><br/>
-  Modeled after real-world payment systems like GPay & PhonePe — not a tutorial CRUD app.
+  Modeled after real-world payment systems like Esewa.
 </p>
 
 <p>
@@ -954,11 +954,6 @@ When individual modules (e.g., ledger, notifications) need independent deploymen
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
 
 <div align="center">
 
